@@ -1,0 +1,42 @@
+# Instructions 
+
+### https://cloud.google.com/sql/docs/postgres/configure-ssl-instance
+
+# List ca certs; if not exists add new one
+gcloud beta sql ssl server-ca-certs list --instance=sql-d-use4c-pstgrs-05
+
+# Save the CA cert to a file
+gcloud beta sql ssl server-ca-certs list \
+--format="value(cert)" \
+--instance=sql-d-use4c-pstgrs-05 > \
+./sql-d-use4c-pstgrs-05.cacert.pem
+
+# List client certs
+gcloud sql ssl client-certs list --instance=sql-d-use4c-pstgrs-05
+Listed 0 items.
+
+# Create a new client cert
+gcloud sql ssl client-certs create client-cert ./sql-d-use4c-pstgrs-05.client-key.pem --instance=sql-d-use4c-pstgrs-05
+
+# Above step create a new client key in file
+ ls -l ./sql-d-use4c-pstgrs-05.client-key.pem
+
+gcloud sql ssl client-certs list  --instance=sql-d-use4c-pstgrs-05
+NAME         SHA1_FINGERPRINT                          EXPIRATION
+client-cert  96cfca3b17f1fd776710e80d60c11830cb237888  2032-06-23T17:42:54.179Z
+
+# Save client cert to a file
+gcloud sql ssl client-certs describe client-cert  --instance=sql-d-use4c-pstgrs-05 --format="value(cert)" > ./sql-d-use4c-pstgrs-05.client-cert.pem
+
+# Save server CA cert to a file
+gcloud sql instances describe sql-d-use4c-pstgrs-05 --format="value(serverCaCert.cert)" > sql-d-use4c-pstgrs-05.server-ca.pem
+
+# GCE provides you with 3 things client-cert.pem client-key.pem server-ca.pem
+the client key must be converted to pk8 with the following command:
+
+sudo openssl pkcs8 -topk8 -inform PEM -outform DER -in client-key.pem -out client-key.pk8 -nocrypt
+
+# Copy the actual files to the docker container with Dockerfile and reference the location in the following step
+# Add the following as the database connection URL suffix
+?sslmode=verify-ca&sslrootcert=./server-ca.pem&sslcert=./client-cert.pem&sslkey=./client-key.pk8
+
