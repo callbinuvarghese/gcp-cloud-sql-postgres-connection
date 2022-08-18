@@ -40,3 +40,213 @@ sudo openssl pkcs8 -topk8 -inform PEM -outform DER -in client-key.pem -out clien
 # Add the following as the database connection URL suffix
 ?sslmode=verify-ca&sslrootcert=./server-ca.pem&sslcert=./client-cert.pem&sslkey=./client-key.pk8
 
+
+
+
+
+➜ ✗ pwd
+/Users/binu.b.varghese/source/gcp/cloudsql/
+
+➜  git clone https://github.com/momander/cymbal-eats.git && cd cymbal-eats/menu-service
+  menu-service git:(main) vi env.sh
+export PROJECT_ID=$(gcloud config get-value project)
+export PROJECT_NUMBER=$(gcloud projects describe $PROJECT_ID --format='value(projectNumber)')
+export PROJECT_NAME=$(gcloud projects describe $PROJECT_ID --format='value(name)')
+export REGION=us-east4
+export MENU_SERVICE_NAME=menu-service
+
+export SERVERLESS_VPC_CONNECTOR=cymbalconnector
+export DB_INSTANCE_NAME=menu-catalog
+export DB_INSTANCE_PASSWORD=password123
+export PROJECT_ID=$(gcloud config get-value project)
+export DB_DATABASE=menu-db
+export DB_USER=menu-user
+export DB_PASSWORD=menupassword123
+
+➜  menu-service git:(main) ✗ chmod +x env.sh
+➜  menu-service git:(main) ✗ ./env.sh
+
+➜  menu-service git:(main) ✗ gcloud services enable \
+    sqladmin.googleapis.com \
+    run.googleapis.com \
+    vpcaccess.googleapis.com \
+    servicenetworking.googleapis.com
+Operation "operations/acat.p2-403157937476-75b96126-b6df-4787-94bc-f9747e901213" finished successfully.
+
+
+➜  menu-service git:(main) ✗ gcloud sql instances create $DB_INSTANCE_NAME \
+    --project=$PROJECT_ID \
+    --network=projects/$PROJECT_ID/global/networks/default \
+    --no-assign-ip \
+    --database-version=POSTGRES_12 \
+    --cpu=2 \
+    --memory=4GB \
+    --region=$REGION \
+    --root-password=${DB_INSTANCE_PASSWORD}
+Creating Cloud SQL instance for POSTGRES_12...⠏
+Creating Cloud SQL instance for POSTGRES_12...done.
+Created [https://sqladmin.googleapis.com/sql/v1beta4/projects/PROJECT_ID/instances/menu-catalog].
+NAME          DATABASE_VERSION  LOCATION    TIER              PRIMARY_ADDRESS  PRIVATE_ADDRESS  STATUS
+menu-catalog  POSTGRES_12       us-east4-b  db-custom-2-4096  -                10.9.98.20       RUNNABLE
+
+➜  menu-service git:(main) ✗ gcloud sql databases create $DB_DATABASE --instance=$DB_INSTANCE_NAME
+Creating Cloud SQL database...done.
+Created database [menu-db].
+instance: menu-catalog
+name: menu-db
+project: PROJECT_ID
+➜  menu-service git:(main) ✗ gcloud sql users create ${DB_USER} \
+    --password=$DB_PASSWORD \
+    --instance=$DB_INSTANCE_NAME
+Creating Cloud SQL user...done.
+Created user [menu-user].
+
+➜  menu-service git:(main) ✗ export DB_INSTANCE_IP=$(gcloud sql instances describe $DB_INSTANCE_NAME \
+    --format=json | jq \
+    --raw-output ".ipAddresses[].ipAddress")
+➜  menu-service git:(main) ✗ echo $DB_INSTANCE_IP
+10.9.98.20
+
+➜  menu-service git:(main) ✗ gcloud sql instances describe menu-catalog
+
+
+gcloud projects add-iam-policy-binding $PROJECT_ID \
+--member="serviceAccount:$PROJECT_NUMBER-compute@developer.gserviceaccount.com" \
+--role="roles/cloudsql.client"
+
+gcloud compute networks vpc-access connectors create ${SERVERLESS_VPC_CONNECTOR} \
+    --region=${REGION} \
+    --range=10.8.0.0/28
+
+
+➜  menu-service git:(main) ✗ gcloud compute networks vpc-access connectors list --region=us-east4
+CONNECTOR_ID           REGION    NETWORK             IP_CIDR_RANGE  SUBNET  SUBNET_PROJECT  MACHINE_TYPE  MIN_INSTANCES  MAX_INSTANCES  MIN_THROUGHPUT  MAX_THROUGHPUT  STATE
+cymbalconnector        us-east4  default             10.8.12.0/28                           e2-micro      2              10             200             1000            READY
+
+Connector on the Same Network "default" as the SQL instance
+
+Using the existing cymbalconnector which on default network and on us-east4
+
+➜  menu-service git:(main) ✗ jenv local 11.0.8
+➜  menu-service git:(main) ✗ java -version
+openjdk version "11.0.11" 2021-04-20
+OpenJDK Runtime Environment AdoptOpenJDK-11.0.11+9 (build 11.0.11+9)
+OpenJDK 64-Bit Server VM AdoptOpenJDK-11.0.11+9 (build 11.0.11+9, mixed mode)
+
+BEGIN: The service Dockerfile is not working as expected
+➜  menu-service git:(main) ✗ ./mvnw package -DskipTests
+
+➜  menu-service git:(main) ✗ gcloud builds submit --tag us-east4-docker.pkg.dev/PROJECT_ID/quickstart-docker-repo/menu-service:latest
+
+END: The service Dockerfile is not working as expected
+
+Using another service with Spring Boot API
+
+➜  menu-service git:(main) ✗ gcloud run deploy $MENU_SERVICE_NAME \
+    --image=us-east4-docker.pkg.dev/PROJECT_ID/quickstart-docker-repo/sb-postgres-ex:latest \
+    --region $REGION \
+    --allow-unauthenticated \
+    --set-env-vars spring_datasource_username=$DB_USER \
+    --set-env-vars spring_datasource_password=$DB_PASSWORD \
+    --set-env-vars spring_datasource_url="jdbc:postgresql://$DB_INSTANCE_IP/menu-db" \
+    --vpc-connector $SERVERLESS_VPC_CONNECTOR \
+    --project=$PROJECT_ID \
+    --quiet
+Deploying container to Cloud Run service [menu-service] in project [PROJECT_ID] region [us-east4]
+X Deploying... Done.
+  ✓ Creating Revision...
+  ✓ Routing traffic...
+    Setting IAM Policy...
+Completed with warnings:
+  Setting IAM policy failed, try "gcloud beta run services add-iam-policy-binding --region=us-east4 --member=allUsers --role=roles/run.invoker menu-service"
+Service [menu-service] revision [menu-service-00007-dac] has been deployed and is serving 100 percent of traffic.
+Service URL: https://menu-service-vtyatvjjvq-uk.a.run.app
+
+
+
+➜  menu-service git:(main) ✗ curl -X GET -H "Authorization: bearer $(gcloud auth print-identity-token)" \
+  -H "Content-Type: application/json" \
+  https://menu-service-vtyatvjjvq-uk.a.run.app/showCities
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>Cities</title>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    </head>
+
+    <body>
+        <h2>List of cities</h2>
+
+        <table>
+            <tr>
+                <th>Id</th>
+                <th>Name</th>
+                <th>Population</th>
+            </tr>
+
+            <tr>
+                <td>1</td>
+                <td>Bratislava</td>
+                <td>432000</td>
+            </tr>
+
+            <tr>
+                <td>2</td>
+                <td>Budapest</td>
+                <td>1759000</td>
+            </tr>
+
+            <tr>
+                <td>3</td>
+                <td>Prague</td>
+                <td>1280000</td>
+            </tr>
+
+            <tr>
+                <td>4</td>
+                <td>Warsaw</td>
+                <td>1748000</td>
+            </tr>
+
+            <tr>
+                <td>5</td>
+                <td>Los Angeles</td>
+                <td>3971000</td>
+            </tr>
+
+            <tr>
+                <td>6</td>
+                <td>New York</td>
+                <td>8550000</td>
+            </tr>
+
+            <tr>
+                <td>7</td>
+                <td>Edinburgh</td>
+                <td>464000</td>
+            </tr>
+
+            <tr>
+                <td>8</td>
+                <td>Berlin</td>
+                <td>3671000</td>
+            </tr>
+        </table>
+
+    </body>
+</html>%
+➜  menu-service git:(main) ✗ echo $DB_INSTANCE_IP
+10.9.98.20
+
+➜  menu-service git:(main) ✗ gcloud run services delete $MENU_SERVICE_NAME \
+    --region $REGION \
+    --project=$PROJECT_ID
+
+Service [menu-service] will be deleted.
+
+Do you want to continue (Y/n)?  y
+
+Deleting [menu-service]...done.
+Deleted service [menu-service].
+
