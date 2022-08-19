@@ -250,3 +250,191 @@ Do you want to continue (Y/n)?  y
 Deleting [menu-service]...done.
 Deleted service [menu-service].
 
+
+
+SSL TLS configuration ( Require TLS for SQL Connectivity)
+======================
+### Turn On SSL Requirement
+➜  menu-service git:(main) ✗ echo $DB_INSTANCE_NAME
+menu-catalog
+➜  menu-service git:(main) ✗ gcloud sql instances patch $DB_INSTANCE_NAME --require-ssl
+
+The following message will be used for the patch API method.
+{"name": "menu-catalog", "project": "PROJECT_ID", "settings": {"ipConfiguration": {"requireSsl": true}}}
+Patching Cloud SQL instance...done.
+Updated [https://sqladmin.googleapis.com/sql/v1beta4/projects/PROJECT_ID/instances/menu-catalog].
+
+### Deploy service that was working earlier
+  menu-service git:(main) ✗ gcloud run deploy $MENU_SERVICE_NAME \
+    --image=us-east4-docker.pkg.dev/PROJECT_ID/quickstart-docker-repo/sb-postgres-ex:latest \
+    --region $REGION \
+    --allow-unauthenticated \
+    --set-env-vars spring_datasource_username=$DB_USER \
+    --set-env-vars spring_datasource_password=$DB_PASSWORD \
+    --set-env-vars spring_datasource_url="jdbc:postgresql://$DB_INSTANCE_IP/menu-db" \
+    --vpc-connector $SERVERLESS_VPC_CONNECTOR \
+    --project=$PROJECT_ID \
+    --quiet
+X Deploying... Cloud Run error: The user-provided container failed to start and
+ listen on the port defined provided by the PORT=8080 environment variable. Log
+s for this revision might contain more information.
+yiz%22
+Logs URL: https://console.uidance, see https://cloud.google.com/run/docs
+cloud.google.com/logs/viewer?project=PROJECT_ID&resource=cloud_run
+_revision/service_name/menu-service/revision_name/menu-service-00003-yiz&advanc
+edFilter=resource.type%3D%22cloud_run_revision%22%0Aresource.labels.service_nam
+e%3D%22menu-service%22%0Aresource.labels.revision_name%3D%22menu-service-00003-
+yiz%22
+
+### Error message for not connecting with Certs
+org.postgresql.util.PSQLException: FATAL: connection requires a valid client certificate
+
+### List server CA and download
+➜  menu-service git:(main) ✗ gcloud beta sql ssl server-ca-certs list \
+--instance=$DB_INSTANCE_NAME
+SHA1_FINGERPRINT                          EXPIRATION
+3d216097fe38b52270b14137fbd792d29783ef41  2032-08-13T16:55:06.709Z
+
+gcloud beta sql ssl server-ca-certs list \
+--format="value(cert)" \
+--instance=$DB_INSTANCE_NAME > "$DB_INSTANCE_NAME.server-ca.pem"
+
+menu-service git:(main) ✗ cat "$DB_INSTANCE_NAME.server-ca.pem"
+
+### Client Cert list and Create
+
+export CERT_NAME=menu-client-cert
+➜  menu-service git:(main) ✗ gcloud sql ssl client-certs list  --instance=$DB_IN
+STANCE_NAME
+Listed 0 items.
+
+➜  menu-service git:(main) ✗ gcloud sql ssl client-certs create $CERT_NAME "$DB_INSTANCE_NAME.client-key.pem" --instance=$DB_INSTANCE_NAME
+
+Created [https://sqladmin.googleapis.com/sql/v1beta4/projects/PROJECT_ID/instances/menu-catalog/sslCerts/ad6ed45b645d8fc7f3fbf946a05b39584c6c3470].
+NAME              SHA1_FINGERPRINT                          EXPIRATION
+menu-client-cert  ad6ed45b645d8fc7f3fbf946a05b39584c6c3470  2032-08-16T11:39:21.805Z
+
+
+➜  menu-service git:(main) ✗ gcloud sql ssl client-certs list  --instance=$DB_INSTANCE_NAME
+NAME              SHA1_FINGERPRINT                          EXPIRATION
+menu-client-cert  ad6ed45b645d8fc7f3fbf946a05b39584c6c3470  2032-08-16T11:39:21.805Z
+
+
+➜  menu-service git:(main) ✗ gcloud sql ssl client-certs describe $CERT_NAME --instance=$DB_INSTANCE_NAME --format="value(cert)" > "./$DB_INSTANCE_NAME.client-cert.pem"
+
+### Convert PEM key to PK8 for Java
+➜  menu-service git:(main) ✗ sudo openssl pkcs8 -topk8 -inform PEM -outform DER -in "./$DB_INSTANCE_NAME.client-key.pem" -out "./$DB_INSTANCE_NAME.client-key.pk8" -nocrypt
+
+➜  menu-service git:(main) ✗ sudo chmod o+r "./$DB_INSTANCE_NAME.client-key.pk8"
+
+➜  menu-catalog sudo chown binu.b.varghese *
+➜  menu-catalog ls -l
+total 32
+-rw-r--r--  1 binu.b.varghese  staff  1269 Aug 19 07:52 menu-catalog.client-cert.pem
+-rw-------  1 binu.b.varghese  staff  1679 Aug 19 07:51 menu-catalog.client-key.pem
+-rw----r--  1 binu.b.varghese  staff  1219 Aug 19 07:51 menu-catalog.client-key.pk8
+-rw-r--r--  1 binu.b.varghese  staff  1273 Aug 19 07:50 menu-catalog.server-ca.pem
+
+### Copy certs to source and Build new image containing certs
+
+➜  db-certs cp menu-catalog/menu-catalog.client-cert.pem client-cert.pem
+➜  db-certs cp menu-catalog/menu-catalog.client-key.pk8 client-key.pk8
+➜  db-certs cp menu-catalog/menu-catalog.server-ca.pem server-ca.pem
+
+➜  springboot gcloud builds submit --region=us-east4 --tag us-east4-docker.pkg.dev/PROJECT_ID/quickstart-docker-repo/sb-postgres-ex:latest
+
+### Deploy with cert connection for postgres
+➜  menu-service git:(main) ✗ gcloud run deploy $MENU_SERVICE_NAME \
+    --image=us-east4-docker.pkg.dev/PROJECT_ID/quickstart-docker-repo/sb-postgres-ex:latest \
+    --region $REGION \
+    --allow-unauthenticated \
+    --set-env-vars spring_datasource_username=$DB_USER \
+    --set-env-vars spring_datasource_password=$DB_PASSWORD \
+    --set-env-vars spring_datasource_url="jdbc:postgresql://$DB_INSTANCE_IP/menu-db?sslmode=verify-ca&sslrootcert=./server-ca.pem&sslcert=./client-cert.pem&sslkey=./client-key.pk8" \
+    --vpc-connector $SERVERLESS_VPC_CONNECTOR \
+    --project=$PROJECT_ID \
+    --quiet
+Deploying container to Cloud Run service [menu-service] in project [PROJECT_ID] region [us-east4]
+X Deploying... Done.
+  ✓ Creating Revision...
+  ✓ Routing traffic...
+    Setting IAM Policy...
+Completed with warnings:
+  Setting IAM policy failed, try "gcloud beta run services add-iam-policy-binding --region=us-east4 --member=allUsers --role=roles/run.invoker menu-service"
+Service [menu-service] revision [menu-service-00004-jip] has been deployed and is serving 100 percent of traffic.
+Service URL: https://menu-service-vtyatvjjvq-uk.a.run.app
+
+### Test service and it works
+➜  menu-service git:(main) ✗ curl -X GET -H "Authorization: bearer $(gcloud auth print-identity-token)" \
+  -H "Content-Type: application/json" \
+  https://menu-service-vtyatvjjvq-uk.a.run.app/showCities
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>Cities</title>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    </head>
+
+    <body>
+        <h2>List of cities</h2>
+
+        <table>
+            <tr>
+                <th>Id</th>
+                <th>Name</th>
+                <th>Population</th>
+            </tr>
+
+            <tr>
+                <td>1</td>
+                <td>Bratislava</td>
+                <td>432000</td>
+            </tr>
+
+            <tr>
+                <td>2</td>
+                <td>Budapest</td>
+                <td>1759000</td>
+            </tr>
+
+            <tr>
+                <td>3</td>
+                <td>Prague</td>
+                <td>1280000</td>
+            </tr>
+
+            <tr>
+                <td>4</td>
+                <td>Warsaw</td>
+                <td>1748000</td>
+            </tr>
+
+            <tr>
+                <td>5</td>
+                <td>Los Angeles</td>
+                <td>3971000</td>
+            </tr>
+
+            <tr>
+                <td>6</td>
+                <td>New York</td>
+                <td>8550000</td>
+            </tr>
+
+            <tr>
+                <td>7</td>
+                <td>Edinburgh</td>
+                <td>464000</td>
+            </tr>
+
+            <tr>
+                <td>8</td>
+                <td>Berlin</td>
+                <td>3671000</td>
+            </tr>
+        </table>
+
+    </body>
+</html>%
+➜  menu-service git:(main) ✗
