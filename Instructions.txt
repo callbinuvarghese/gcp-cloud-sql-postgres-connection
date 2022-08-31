@@ -1,35 +1,37 @@
 # Instructions 
 
 ### https://cloud.google.com/sql/docs/postgres/configure-ssl-instance
-
+export DB_INSTANCE_NAME=sql-d-use4c-pstgrs-05
+gcloud sql instances patch $DB_INSTANCE_NAME --require-ssl
+ 
 # List ca certs; if not exists add new one
-gcloud beta sql ssl server-ca-certs list --instance=sql-d-use4c-pstgrs-05
+gcloud beta sql ssl server-ca-certs list --instance="$DB_INSTANCE_NAME"
 
 # Save the CA cert to a file
 gcloud beta sql ssl server-ca-certs list \
 --format="value(cert)" \
---instance=sql-d-use4c-pstgrs-05 > \
-./sql-d-use4c-pstgrs-05.cacert.pem
+--instance="$DB_INSTANCE_NAME" > \
+"./$DB_INSTANCE_NAME.cacert.pem"
 
 # List client certs
-gcloud sql ssl client-certs list --instance=sql-d-use4c-pstgrs-05
+gcloud sql ssl client-certs list --instance="$DB_INSTANCE_NAME"
 Listed 0 items.
 
 # Create a new client cert
-gcloud sql ssl client-certs create client-cert ./sql-d-use4c-pstgrs-05.client-key.pem --instance=sql-d-use4c-pstgrs-05
+gcloud sql ssl client-certs create client-cert ./$DB_INSTANCE_NAME.client-key.pem --instance="$DB_INSTANCE_NAME"
 
 # Above step create a new client key in file
- ls -l ./sql-d-use4c-pstgrs-05.client-key.pem
+ ls -l ./$DB_INSTANCE_NAME.client-key.pem
 
-gcloud sql ssl client-certs list  --instance=sql-d-use4c-pstgrs-05
+gcloud sql ssl client-certs list  --instance="$DB_INSTANCE_NAME"
 NAME         SHA1_FINGERPRINT                          EXPIRATION
 client-cert  96cfca3b17f1fd776710e80d60c11830cb237888  2032-06-23T17:42:54.179Z
 
 # Save client cert to a file
-gcloud sql ssl client-certs describe client-cert  --instance=sql-d-use4c-pstgrs-05 --format="value(cert)" > ./sql-d-use4c-pstgrs-05.client-cert.pem
+gcloud sql ssl client-certs describe client-cert  --instance="$DB_INSTANCE_NAME" --format="value(cert)" > ./$DB_INSTANCE_NAME.client-cert.pem
 
 # Save server CA cert to a file
-gcloud sql instances describe sql-d-use4c-pstgrs-05 --format="value(serverCaCert.cert)" > sql-d-use4c-pstgrs-05.server-ca.pem
+gcloud sql instances describe "$DB_INSTANCE_NAME" --format="value(serverCaCert.cert)" >  $DB_INSTANCE_NAME.server-ca.pem
 
 # GCE provides you with 3 things client-cert.pem client-key.pem server-ca.pem
 the client key must be converted to pk8 with the following command:
@@ -53,13 +55,23 @@ export PROJECT_ID=$(gcloud config get-value project)
 export PROJECT_NUMBER=$(gcloud projects describe $PROJECT_ID --format='value(projectNumber)')
 export PROJECT_NAME=$(gcloud projects describe $PROJECT_ID --format='value(name)')
 export REGION=us-east4
-export MENU_SERVICE_NAME=menu-service
+#export MENU_SERVICE_NAME=menu-service
+export BOOK_SERVICE_NAME=book-service
+export CLOUD_RUN_SERVICE_NAME="$BOOK_SERVICE_NAME"
+export CLOUD_RUN_IMAGE_TAG="us-east4-docker.pkg.dev/acn-highmark-health-odh/quickstart-docker-repo/${CLOUD_RUN_SERVICE_NAME}:latest"
+export REGION=us-east4
 
+# VPC Connector and the private ip database should be on the same region
 export SERVERLESS_VPC_CONNECTOR=cymbalconnector
-export DB_INSTANCE_NAME=menu-catalog
-export DB_INSTANCE_PASSWORD=password123
+#export DB_INSTANCE_NAME=menu-catalog
+export DB_INSTANCE_NAME=sql-d-use4c-pstgrs-05
+#export DB_INSTANCE_PASSWORD=password123
+export DB_INSTANCE_PASSWORD=binupassword123
 export PROJECT_ID=$(gcloud config get-value project)
-export DB_DATABASE=menu-db
+#export DB_DATABASE=menu-db
+#export DB_USER=menu-user
+#export DB_PASSWORD=menupassword123
+export DB_DATABASE=book-db
 export DB_USER=menu-user
 export DB_PASSWORD=menupassword123
 
@@ -141,9 +153,17 @@ BEGIN: The service Dockerfile is not working as expected
 END: The service Dockerfile is not working as expected
 
 Using another service with Spring Boot API
+export BOOK_SERVICE_NAME=book-service
+export SERVERLESS_VPC_CONNECTOR=cymbalconnector
+export DB_INSTANCE_NAME=sql-d-use4c-pstgrs-06
+export DB_INSTANCE_PASSWORD=password123
+export DB_DATABASE=book-db
+export DB_USER=book-user
+export DB_PASSWORD=bookpassword123
+export BOOK_SERVICE_IMAGE_URL="us-east4-docker.pkg.dev/PROJECT_ID/quickstart-docker-repo/sb-postgres-ex:latest"
 
-➜  menu-service git:(main) ✗ gcloud run deploy $MENU_SERVICE_NAME \
-    --image=us-east4-docker.pkg.dev/PROJECT_ID/quickstart-docker-repo/sb-postgres-ex:latest \
+➜  menu-service git:(main) ✗ gcloud run deploy $BOOK_SERVICE_NAME \
+    --image="$BOOK_SERVICE_IMAGE_URL" \
     --region $REGION \
     --allow-unauthenticated \
     --set-env-vars spring_datasource_username=$DB_USER \
@@ -164,9 +184,11 @@ Service URL: https://menu-service-vtyatvjjvq-uk.a.run.app
 
 
 
-➜  menu-service git:(main) ✗ curl -X GET -H "Authorization: bearer $(gcloud auth print-identity-token)" \
-  -H "Content-Type: application/json" \
-  https://menu-service-vtyatvjjvq-uk.a.run.app/showCities
+➜  export CLOUD_RUN_SERVICE_URL=$(gcloud run services describe $CLOUD_RUN_SERVICE_NAME --platform managed --region $REGION --format 'value(status.url)')
+➜  echo $CLOUD_RUN_SERVICE_URL
+
+➜  menu-service git:(main) ✗ curl -X GET $CLOUD_RUN_SERVICE_URL/showCities  -H "Authorization: bearer $(gcloud auth print-identity-token)
+
 <!DOCTYPE html>
 <html>
     <head>
