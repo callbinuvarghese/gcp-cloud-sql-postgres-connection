@@ -4,6 +4,11 @@
 export DB_INSTANCE_NAME=sql-d-use4c-pstgrs-05
 gcloud sql instances patch $DB_INSTANCE_NAME --require-ssl
  
+# Once patched connection without SSL will show the following error
+➜  curl -X GET $CLOUDRUN_INSTANCE_URL  -H "Authorization: bearer $(gcloud auth print-identity-token)"
+
+{"code":500,"detailedMessage":"connection to server at \"10.9.98.25\", port 5432 failed: FATAL:  connection requires a valid client certificate\nconnection to server at \"10.9.98.25\", port 5432 failed: FATAL:  pg_hba.conf rejects connection for host \"10.8.12.7\", user \"test-user\", database \"test-db\", SSL off\n","message":"Internal server error"}
+
 # List ca certs; if not exists add new one
 gcloud beta sql ssl server-ca-certs list --instance="$DB_INSTANCE_NAME"
 
